@@ -189,106 +189,131 @@ def render_figure(sw: dict) -> None:
 
 
 def sweep_support_threshold(s_min_levels: list[float] = [0.01, 0.02, 0.05, 0.10, 0.15, 0.20],
-                            M: int = 20, seed: int = 20260610) -> pd.DataFrame:
-    """Action A12: Sensitivity analysis of the support threshold s_min."""
+                            M: int = 30, seed: int = 20260610) -> pd.DataFrame:
+    """Sensitivity of structural recovery to the proposal support threshold s_min,
+    averaged over M replications (previously a single seed)."""
+    from closed_loop_sim import refinement
     cfg = base_cell()
+    seeds = np.random.SeedSequence(seed).generate_state(M)
     rows = []
-    for s_min in s_min_levels:
-        from closed_loop_sim import refinement
-        orig_smin = refinement.S_MIN
-        try:
+    orig = refinement.S_MIN
+    try:
+        for s_min in s_min_levels:
             refinement.S_MIN = s_min
-            res = _run_one(cfg, seed, with_est=False)
-            rows.append({
-                "sweep": "support_threshold",
-                "s_min": s_min,
-                "A_precision": res["A"]["precision"],
-                "A_recall": res["A"]["recall"],
-                "A_f1": res["A"]["f1"],
-                "B_precision": res["B"]["precision"],
-                "B_recall": res["B"]["recall"],
-                "B_f1": res["B"]["f1"],
-            })
-        finally:
-            refinement.S_MIN = orig_smin
+            res = [_run_one(cfg, int(sd), with_est=False) for sd in seeds]
+            row = {"sweep": "support_threshold", "s_min": s_min, "M": M}
+            for arm in ("A", "B"):
+                for k in ("precision", "recall", "f1", "shd"):
+                    row[f"{arm}_{k}"] = float(np.mean([r[arm][k] for r in res]))
+            rows.append(row)
+    finally:
+        refinement.S_MIN = orig
     return pd.DataFrame(rows)
 
 
-def sweep_replications_convergence(M_levels: list[int] = [50, 100, 200, 500, 1000, 2000],
-                                    master_seed: int = 20260610) -> pd.DataFrame:
-    """Action A24: Replication convergence and sensitivity run up to M=2000."""
-    cfg = base_cell()
-    rows = []
-    for M in M_levels:
-        from closed_loop_sim.experiment import run_cell
-        res = run_cell(cfg, M=M, master_seed=master_seed, with_estimation=False)
-        rows.append({
-            "M": M,
-            "A_accept_trap_rate": res["structural"]["A"]["accept_any_trap_rate"],
-            "B_accept_trap_rate": res["structural"]["B"]["accept_any_trap_rate"],
-            "B_precision_mean": res["structural"]["B"]["precision_mean"],
-            "B_recall_mean": res["structural"]["B"]["recall_mean"],
-        })
-    return pd.DataFrame(rows)
+BASE_EDGES = {("S0", "S1"), ("S0", "S2"), ("S0", "S3"), ("S1", "S2"), ("S1", "S3"), ("S2", "S3")}
+CH_ARMS = ["A", "B", "B_unk", "B_defer", "Initial", "PC_Temporal"]
 
 
-def sweep_challenge_scenarios(M: int = 10, master_seed: int = 20260610) -> pd.DataFrame:
-    """Action A10: Challenge Scenarios sweep.
-    
-    Probes framework performance under:
-      1. 'baseline': Default cell (forward traps present).
-      2. 'feedback_cvae_ckd': True biological feedback S2->S1 present in DGP. Evaluates
-         the structural cost/penalty of wrongly rejecting true backward edges by a rigid gate.
-      3. 'held_out_artifact': Novel artifact class (Lab_Reassay) unknown to keyword rules gate.
-      4. 'high_artefact_rate': High rate of decoy and recode artifacts.
-    """
-    from closed_loop_sim.eventlog import build_event_log_data
-    from closed_loop_sim.discovery import discover
-    from closed_loop_sim.refinement import ARMS, cost_of_rejecting_true_backward_edges
-    from closed_loop_sim.metrics import structural_metrics
-
+def sweep_challenge_scenarios(M: int = 100, master_seed: int = 20260610) -> pd.DataFrame:
+    """Scenarios the gate's rules were not written for. Each is graded against ITS OWN truth:
+    with true feedback S2->S1 the truth graph contains that edge and only S2->S0 is a trap."""
+    from closed_loop_sim.experiment import run_cell
     scenarios = [
-        ("baseline", lambda cfg: None),
-        ("feedback_cvae_ckd", lambda cfg: setattr(cfg.dgp, "challenge_scenario", "feedback_cvae_ckd")),
-        ("held_out_artifact", lambda cfg: (setattr(cfg.obs, "challenge_scenario", "held_out_artifact"), setattr(cfg.obs, "p_held_out", 0.4))),
-        ("high_artefact_rate", lambda cfg: (setattr(cfg.obs, "p_switch", 0.7), setattr(cfg.obs, "p_recode", 0.6))),
+        ("baseline", lambda c: None, BASE_EDGES, None),
+        ("feedback_cvae_ckd", lambda c: setattr(c.dgp, "challenge_scenario", "feedback_cvae_ckd"),
+         BASE_EDGES | {("S2", "S1")}, {("S2", "S0")}),
+        ("feedback_no_artefacts", lambda c: (setattr(c.dgp, "challenge_scenario", "feedback_cvae_ckd"),
+                                             setattr(c.obs, "p_switch", 0.0), setattr(c.obs, "p_recode", 0.0)),
+         BASE_EDGES | {("S2", "S1")}, {("S2", "S0")}),
+        ("held_out_artifact", lambda c: setattr(c.obs, "p_held_out", 0.4), BASE_EDGES, None),
+        ("high_artefact_rate", lambda c: (setattr(c.obs, "p_switch", 0.7), setattr(c.obs, "p_recode", 0.6)),
+         BASE_EDGES, None),
+        ("no_mediation_S1S2_absent", lambda c: setattr(c.dgp.transitions["S1->S2"], "lam", 1e-9),
+         BASE_EDGES - {("S1", "S2")}, None),
     ]
+    rows = []
+    for name, apply_fn, truth, traps in scenarios:
+        cfg = base_cell(); apply_fn(cfg)
+        cell = run_cell(cfg, M=M, master_seed=master_seed, with_estimation=False, workers=9,
+                        true_edges=truth, trap_edges=traps, arms=CH_ARMS)
+        for arm in CH_ARMS:
+            x = cell["structural"][arm]
+            rows.append({"sweep": "challenge_scenarios", "scenario": name, "arm": arm, "M": M,
+                         "precision": x["precision_mean"], "recall": x["recall_mean"], "shd": x["shd_mean"],
+                         "false_edges": x["n_other_false_edges_mean"] + x["n_traps_accepted_mean"],
+                         "held_out_accept": x["held_out_accept_rate"],
+                         "deferred": x["n_deferred_mean"], "deferred_true": x["deferred_true_edges_mean"],
+                         "deferred_artefacts": x["deferred_artefacts_mean"],
+                         "wrongly_removed_true": x["wrongly_removed_true_edges_mean"]})
+    return pd.DataFrame(rows)
 
+
+def rules_hash() -> str:
+    """Fingerprint of the frozen gate rules, recorded BEFORE the red-team scenarios run."""
+    import hashlib, inspect
+    from closed_loop_sim import discovery, refinement
+    src = inspect.getsource(refinement.RulesGate) + repr(sorted(discovery.ADMIN_ACTIVITIES)) + repr(refinement.PHASE1_STATE_ORDER)
+    return hashlib.sha256(src.encode()).hexdigest()[:16]
+
+
+def sweep_redteam(M: int = 60, master_seed: int = 20260610, oracle_n: int = 200_000) -> pd.DataFrame:
+    """Extra mechanisms for the estimand, run with the rules frozen (hash recorded). NOT blind:
+    the same team wrote rules and scenarios. A blind version needs a second party."""
+    from closed_loop_sim.experiment import run_cell
+    from closed_loop_sim.truth import ckd_truth
+    ARMS_ = ["A", "B", "Initial"]
+    def null(c):
+        for tp in c.dgp.transitions.values(): tp.beta_E = 0.0
+        c.obs.p_switch = c.obs.p_recode = 0.0
+    def conf(c):
+        c.dgp.frailty_exposure, c.dgp.frailty_hazard = 0.8, 0.4
+    scenarios = [("negative_control_null_effect", null), ("latent_confounder", conf),
+                 ("loss_to_follow_up", lambda c: setattr(c.obs, "loss_rate", 0.10))]
+    rows = []
+    for name, fn in scenarios:
+        cfg = base_cell(); fn(cfg)
+        orc = ckd_truth(cfg, oracle_n, 999, cfg.dgp.t_max)
+        cell = run_cell(cfg, M=M, master_seed=master_seed, with_estimation=True, workers=9, oracle=orc,
+                        boot_B=50, arms=ARMS_)
+        est = cell["estimation"]
+        lat = est["latent_primary"]["risk_difference"]
+        rows.append({"sweep": "redteam", "scenario": name, "arm": "latent", "M": M, "truth_rd": orc["risk_difference"],
+                     "rd_mean": lat["mean"], "rd_bias": lat["bias"], "rd_sd": lat["sd"],
+                     "ci_cover": est["latent_primary"].get("rd_ci_coverage", {}).get("coverage", float("nan"))})
+        for arm in ARMS_:
+            b = est["by_arm"][arm]
+            rows.append({"sweep": "redteam", "scenario": name, "arm": arm, "M": M, "truth_rd": orc["risk_difference"],
+                         "rd_mean": b["risk_difference"]["mean"], "rd_bias": b["risk_difference"]["bias"],
+                         "rd_sd": b["risk_difference"]["sd"], "ci_cover": b["rd_ci_coverage"]["coverage"]})
+        print(f"  redteam {name}: truth {orc['risk_difference']:.4f}", flush=True)
+    return pd.DataFrame(rows)
+
+
+def sweep_overlap(alpha0_levels=(0.8, 1.8, 2.9), M: int = 40, master_seed: int = 20260610) -> pd.DataFrame:
+    """Positivity sweep: push PPI prevalence towards the case-study 92.8%. The oracle is
+    the shared high-precision one (the whole-population ATE does not depend on alpha0)."""
+    from closed_loop_sim.estimation import estimate_arm
+    from closed_loop_sim.causal import overlap_diagnostics
+    from closed_loop_sim.truth import cached_oracle
+    orc = cached_oracle(base_cell(), OUT / "oracle_ckd.json", n=1_000_000)
     rows = []
     seeds = np.random.SeedSequence(master_seed).generate_state(M)
-    for sc_name, apply_fn in scenarios:
-        a_prec, b_prec, b_rec, b_fn_rate = [], [], [], []
-        for s in seeds:
-            cfg = base_cell()
-            apply_fn(cfg)
-            data = build_event_log_data(cfg.n, cfg, int(s))
+    for a0 in alpha0_levels:
+        cfg = base_cell(); cfg.dgp.propensity.alpha0 = a0
+        rd, ov = [], []
+        for sd in seeds:
+            data = build_event_log_data(cfg.n, cfg, int(sd))
             disc = discover(data.log, data.visit_counts, compute_activity_dfg=False)
-            ref_a = ARMS["A"](disc)
-            ref_b = ARMS["B"](disc)
-            sm_a = structural_metrics(ref_a)
-            sm_b = structural_metrics(ref_b)
-
-            true_edges = (
-                {("S0", "S1"), ("S0", "S2"), ("S0", "S3"), ("S1", "S2"), ("S1", "S3"), ("S2", "S3"), ("S2", "S1")}
-                if sc_name == "feedback_cvae_ckd"
-                else {("S0", "S1"), ("S0", "S2"), ("S0", "S3"), ("S1", "S2"), ("S1", "S3"), ("S2", "S3")}
-            )
-            b_cost = cost_of_rejecting_true_backward_edges(ref_b, true_edges)
-
-            a_prec.append(sm_a["precision"])
-            b_prec.append(sm_b["precision"])
-            b_rec.append(sm_b["recall"])
-            b_fn_rate.append(b_cost["backward_edge_false_negative_rate"])
-
-        rows.append({
-            "sweep": "challenge_scenarios",
-            "scenario": sc_name,
-            "M": M,
-            "Arm_A_precision_mean": float(np.mean(a_prec)),
-            "Arm_B_precision_mean": float(np.mean(b_prec)),
-            "Arm_B_recall_mean": float(np.mean(b_rec)),
-            "Arm_B_backward_fn_rate": float(np.mean(b_fn_rate)),
-        })
+            est = estimate_arm(data, cfg.dgp.t_max, ARMS["B"](disc))
+            rd.append(est["ipw_cif"]["risk_difference"])
+            ov.append(overlap_diagnostics(data.L_std, data.E)[0])
+        row = {"sweep": "overlap", "alpha0": a0, "M": M, "truth_rd": orc["risk_difference"],
+               "rd_ipw_mean": float(np.mean(rd)), "rd_ipw_sd": float(np.std(rd, ddof=1))}
+        row.update({k: float(np.mean([o[k] for o in ov])) for k in ov[0]})
+        rows.append(row)
+        print(f"  alpha0={a0}: exposed={row['prop_exposed']:.3f} ESS0={row['ess_unexposed']:.0f} "
+              f"maxw={row['max_weight']:.1f} RD={row['rd_ipw_mean']:.3f} (truth {row['truth_rd']:.3f})", flush=True)
     return pd.DataFrame(rows)
 
 
@@ -296,9 +321,18 @@ def main():
     sw = run_all()
     sw["support_threshold"] = sweep_support_threshold()
     sw["challenge_scenarios"] = sweep_challenge_scenarios()
+    print("[sweeps] overlap / positivity ...")
+    sw["overlap"] = sweep_overlap()
+    print("[sweeps] red-team scenarios (rules frozen, hash %s) ..." % rules_hash())
+    sw["redteam"] = sweep_redteam()
+    for k_ in ("overlap",):
+        pass
     allrows = pd.concat(sw.values(), ignore_index=True)
     allrows.to_csv(OUT / "sweeps.csv", index=False)
-    (OUT / "sweeps.json").write_text(json.dumps({k: v.to_dict("records") for k, v in sw.items()}, indent=2))
+    out = {k: v.to_dict("records") for k, v in sw.items()}
+    out["meta"] = {"gate_rules_hash": rules_hash(), "blind": False,
+                   "note": "rules frozen before the red-team scenarios ran; same team wrote rules and scenarios"}
+    (OUT / "sweeps.json").write_text(json.dumps(out, indent=2))
     render_figure(sw)
     print("DONE -> results/sweeps.csv, sweeps.json, figure_sweeps.png")
 

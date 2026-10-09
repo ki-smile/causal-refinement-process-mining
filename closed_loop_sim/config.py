@@ -45,7 +45,12 @@ class DGPConfig(BaseModel):
     covariates: CovariateConfig = Field(default_factory=CovariateConfig)
     propensity: PropensityConfig = Field(default_factory=PropensityConfig)
     transitions: dict[str, TransitionParams]
-    challenge_scenario: str | None = None  # Action A10: 'feedback_cvae_ckd', 'latent_common_cause', etc.
+    challenge_scenario: str | None = None  # 'feedback_cvae_ckd'
+    # Latent (unmeasured) common cause Z ~ N(0,1): shifts the exposure logit by
+    # frailty_exposure * Z and every transition log-hazard by frailty_hazard * Z.
+    # Both default to 0, which leaves the base-cell random streams untouched.
+    frailty_hazard: float = 0.0
+    frailty_exposure: float = 0.0
 
 
 # Recorded-timestamp granularity: step in years (None = exact, no rounding).
@@ -63,6 +68,8 @@ class ObservationConfig(BaseModel):
     time_granularity: str = Field("exact", pattern="^(exact|daily|monthly|yearly)$")
     challenge_scenario: str | None = None  # Action A10: 'outcome_dependent_visits', 'held_out_artifact'
     p_held_out: float = Field(0.0, ge=0, le=1)  # held-out artifact rate (Lab_Reassay)
+    # Independent loss to follow-up: exponential(rate) per year. 0 = none (base cell).
+    loss_rate: float = Field(0.0, ge=0)
 
 
 

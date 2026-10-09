@@ -1,6 +1,8 @@
 """Phase 3 integration: discovery -> refinement arms -> structural metrics."""
 from __future__ import annotations
 
+import numpy as np
+
 from closed_loop_sim.config import base_cell
 from closed_loop_sim.discovery import discover
 from closed_loop_sim.eventlog import build_event_log_data
@@ -89,14 +91,24 @@ def test_arm_specific_estimation_in_replication_loop():
 def test_category1_primary_estimands_cif_rmst():
     from closed_loop_sim.config import base_cell
     from closed_loop_sim.eventlog import build_event_log_data
-    from closed_loop_sim.estimation import s0s1_frame, cif_contrasts, rmst_contrasts
+    from closed_loop_sim.estimation import s0s1_arm_frame
+    from closed_loop_sim.causal import overlap_diagnostics, standardized_contrasts
     data = build_event_log_data(1000, base_cell(), seed=1)
-    df = s0s1_frame(data, 10.0)
-    cif = cif_contrasts(df, 10.0)
-    rmst = rmst_contrasts(df, 10.0)
-    assert "risk_difference" in cif
-    assert "risk_ratio" in cif
-    assert "rmtl_diff" in rmst
+    df = s0s1_arm_frame(data, 10.0, None)
+    _, _, w = overlap_diagnostics(data.L_std, data.E)
+    c = standardized_contrasts(df.duration.to_numpy(), df.cause.to_numpy(), data.E, w, 10.0)
+    assert {"risk_difference", "risk_ratio", "rmtl_difference"} <= set(c)
+    assert 0 < c["cif1"] < 1 and 0 < c["cif0"] < 1
+
+
+def test_aj_cif_matches_hand_calculation_with_competing_event():
+    import numpy as np
+    from closed_loop_sim.causal import aj_cif
+    # 4 subjects, unit weights: CKD at 1, death at 2, CKD at 3, censored at 4
+    t, c = np.array([1., 2., 3., 4.]), np.array([1, 2, 1, 0])
+    _, cif = aj_cif(t, c, np.ones(4), 10.0)
+    # t=1: 1/4 ; t=2: S=0.75, no cause-1 ; t=3: S=0.5 -> +0.5*1/2 = 0.25 -> 0.5
+    assert np.allclose(cif, [0.25, 0.25, 0.5, 0.5])
 
 
 def test_category1_phase4_recommendations():
@@ -129,10 +141,42 @@ def test_category1_propensity_diagnostics_and_backdoor():
     from closed_loop_sim.calibration import compute_propensity_diagnostics, verify_backdoor_adjustment_set
     data = build_event_log_data(500, base_cell(), seed=1)
     diag = compute_propensity_diagnostics(data)
-    assert "effective_sample_size" in diag
-    assert len(diag["smds"]) == 5
+    assert diag["max_smd_weighted"] < diag["max_smd_raw"]
+    assert 0 < diag["ps_min"] < diag["ps_max"] < 1
     bd = verify_backdoor_adjustment_set({"S0", "S1", "S2"}, {("S0", "S1")})
     assert bd["backdoor_criterion_satisfied"]
+
+
+def test_identification_depends_on_the_arm_graph():
+    from closed_loop_sim.causal import arm_identification
+    from closed_loop_sim.refinement import ARMS
+    from closed_loop_sim.config import base_cell
+    from closed_loop_sim.discovery import discover
+    from closed_loop_sim.eventlog import build_event_log_data
+    data = build_event_log_data(6000, base_cell(), seed=2)
+    disc = discover(data.log, data.visit_counts)
+    idA, idB = (arm_identification(ARMS[a](disc)) for a in "AB")
+    assert not idA["state_graph_acyclic"] and idA["outcome_contaminated"]   # S2->S0/S2->S1 are backward edges
+    assert idB["state_graph_acyclic"] and not idB["outcome_contaminated"]
+    assert idB["backdoor_valid_L"] and not idB["backdoor_valid_L+V"]        # visits are a descendant of E
+    assert not idA["latent_effect_identified"] and not idB["latent_effect_identified"]   # A4: no arm identifies it
+
+
+def test_held_out_artifact_is_not_caught_by_the_gate():
+    from closed_loop_sim.config import base_cell
+    from closed_loop_sim.discovery import discover
+    from closed_loop_sim.eventlog import build_event_log_data
+    from closed_loop_sim.metrics import structural_metrics
+    from closed_loop_sim.refinement import ARMS
+    cfg = base_cell(); cfg.obs.p_held_out = 0.4
+    data = build_event_log_data(6000, cfg, seed=3)
+    m = structural_metrics(ARMS["B"](discover(data.log, data.visit_counts)))
+    assert m["accepted_held_out"] and m["precision"] < 1.0   # honest limitation of fixed rules
+    from closed_loop_sim.refinement import ARMS as _A
+    d = discover(data.log, data.visit_counts)
+    assert not structural_metrics(_A["B_unk"](d))["accepted_held_out"]       # one extra rule catches it
+    mm = structural_metrics(_A["B_defer"](d))
+    assert mm["n_deferred"] >= 1 and mm["precision"] == 1.0
 
 
 def test_action_a31_explicit_stopping_rules():
@@ -177,3 +221,67 @@ def test_action_a33_demonstrator_benchmark():
 
 
 
+
+
+def test_scenario_truth_changes_the_grade():
+    from closed_loop_sim.refinement import RefinementResult
+    res = RefinementResult(nodes={"S0", "S1", "S2", "S3"},
+                           edges={("S0", "S1"), ("S0", "S2"), ("S1", "S2"), ("S1", "S3"), ("S2", "S3"), ("S2", "S1")}, decisions=[])
+    base = structural_metrics(res)
+    fb = structural_metrics(res, true_edges={("S0", "S1"), ("S0", "S2"), ("S0", "S3"), ("S1", "S2"),
+                                             ("S1", "S3"), ("S2", "S3"), ("S2", "S1")})
+    assert fb["precision"] > base["precision"]
+
+
+def test_latent_confounder_changes_exposure_and_oracle_streams_consistently():
+    from closed_loop_sim.dgp import draw_population_setup
+    cfg = base_cell(); cfg.dgp.frailty_exposure = 1.0; cfg.dgp.frailty_hazard = 0.5
+    L, Ls, Z, E, _ = draw_population_setup(2000, cfg.dgp, 7)
+    assert abs(np.corrcoef(Z, E)[0, 1]) > 0.1
+    L0, _, Z0, E0, _ = draw_population_setup(2000, base_cell().dgp, 7)
+    assert (Z0 == 0).all() and np.allclose(L0, L)    # base cell: covariates identical, no Z
+
+
+def test_loss_to_follow_up_truncates_records_and_hides_deaths():
+    cfg = base_cell(); cfg.obs.loss_rate = 0.5
+    data = build_event_log_data(1500, cfg, seed=4)
+    assert (data.followup_end <= 10.0).all() and data.followup_end.mean() < 5
+    last = data.log.groupby("case").time.max()
+    assert (last <= data.followup_end[last.index.to_numpy()] + 1e-9).all()
+
+
+def test_competing_event_matters_when_death_is_treated_as_censoring():
+    from closed_loop_sim.estimation import s0s1_arm_frame
+    from closed_loop_sim.causal import standardized_contrasts, overlap_diagnostics
+    from closed_loop_sim.refinement import ARMS
+    data = build_event_log_data(6000, base_cell(), seed=11)
+    disc = discover(data.log, data.visit_counts)
+    _, _, w = overlap_diagnostics(data.L_std, data.E)
+    rd = {}
+    for arm in ("B", "Initial"):
+        f_ = s0s1_arm_frame(data, 10.0, ARMS[arm](disc))
+        rd[arm] = standardized_contrasts(f_.duration.to_numpy(), f_.cause.to_numpy(), data.E, w, 10.0)
+    assert abs(rd["B"]["cif0"] - rd["Initial"]["cif0"]) > 0.005   # ignoring death as competing inflates CIF
+
+
+def test_ungated_arm_can_accept_a_mechanical_removal():
+    from closed_loop_sim.refinement import NoneGate, RulesGate, Candidate
+    c = Candidate("remove_edge", "S1", "S2", 0.0, {})
+    assert NoneGate().adjudicate(c).accept and RulesGate().adjudicate(c).accept
+
+
+def test_oracle_shares_random_numbers_across_exposure_worlds():
+    from closed_loop_sim.truth import ckd_truth
+    cfg = base_cell()
+    for tp in cfg.dgp.transitions.values():
+        tp.beta_E = 0.0
+    o = ckd_truth(cfg, 400, seed=5, horizon=10.0)
+    assert o["risk_difference"] == 0.0 and o["rmtl_difference"] == 0.0   # exact null under common random numbers
+
+
+def test_qba_rejects_infeasible_detection_probabilities():
+    from closed_loop_sim.estimation import qba_detection
+    q = qba_detection(0.26, 0.20, se0_assumed=0.8, ratios=(1.0, 1.25, 1.3))
+    assert q["adjusted_rd"]["1.30"] != q["adjusted_rd"]["1.30"]     # NaN: se1 would be 1.04
+    assert q["adjusted_rd"]["1.25"] == q["adjusted_rd"]["1.25"]
+    assert q["nulling_ratio_feasible"] is False                       # nulling ratio 1.30 > 1/Se0 = 1.25: unattainable

@@ -10,21 +10,25 @@ This repository validates the framework under a **known data-generating process*
 
 ## What the study shows
 
-Three claims, each graded against the simulator oracle:
+**This is a known-answer (positive-control) test.** The use case was chosen because its results were already published by the authors; calibration, artefacts and gate rules were written knowing the answer, by people who are not independent of it. It tests whether the machinery can recover known structure, not whether it would find the right structure on a new question. No human or LLM adjudication is simulated.
 
-1. **Structural recovery** — the governed loop recovers the true graph (including adding the Death competing-risk node) from the observed process map.
-2. **Artefact resistance & Challenge Scenarios** — the plausibility gate rejects two observation-induced edges (a drug-feedback *decoy* and a reverse *coding shift*) that an ungoverned arm accepts. Challenge scenarios evaluate framework robustness against **held-out artefact classes** (`Lab_Reassay`), **true biological feedback** ($S_2 \to S_1$), and **surveillance intensity differentials**.
-3. **Primary Estimand Recovery & Bias Mitigation** — primary estimands prioritize **Standardized Cumulative Incidence Function (CIF) contrasts (Risk Difference / Risk Ratio)** and **Restricted Mean Survival Time / Loss (RMST / RMTL)** over hazard ratios. Inverse-Intensity-of-Visit Weighting (**IIW**, Lin 2004) and Quantitative Bias Analysis (**QBA**) correct for surveillance-driven detection delays.
+1. **Transition-graph classification** (not causal-DAG recovery). The two-rule gate (Arm B) rejects the two designed artefacts that the ungated arm accepts; this is guaranteed by construction. A simple forward-order filter ties it in the base cell.
+2. **Scenarios the rules were not written for.** A held-out artefact is accepted by the two-rule gate (one extra rule fixes it); true feedback that coincides with the coding artefact is rejected (a three-way *defer* gate sends it to the expert); edge removal, a negative control, a latent common cause and loss to follow-up are evaluated. Rules are frozen before the red-team scenarios, but the scenarios are not blind.
+3. **Primary estimand: the IPW-standardised 10-year CKD risk difference** (Aalen-Johansen, death and a CVAE-first event competing), checked against one 1,000,000-patient oracle (0.0460, SE 0.0006). On latent data the estimator is valid (bias -0.0005, bootstrap-interval coverage 0.94). On recorded data the risk difference is 1.24x the oracle and the 95% interval covers it 87% of the time. The inflation is differential detection of CKD (sensitivity 0.94 for PPI vs 0.88 for H2B in the simulator). Graph refinement prevents a small extra bias (ungated minus governed: about 0.0034) and does **not** improve accuracy beyond the best available graph. Count-based visit weighting was removed as invalid; surveillance is analysed by a quantitative bias analysis on detection sensitivity (a sensitivity analysis, not a correction).
 
 ### Headline result (base cell: n = 5,000, M = 500 replications)
 
-| Arm | Proposer + gate | Precision | Recall | Accepts ≥1 artefact | Death node |
-|-----|-----------------|-----------|--------|---------------------|-----------|
-| **A** ungated | mechanical + auto-accept | 0.71 | 0.83 | **100%** | ✓ |
-| **B** governed | mechanical + plausibility gate | **1.00** | 0.83 | **0%** | ✓ |
-| **C** oracle | true DAG given | 1.00 | 1.00 | 0% | ✓ |
+| Arm | Precision | Recall | Accepts ≥1 designed artefact |
+|-----|-----------|--------|------------------------------|
+| A ungated | 0.71 | 0.83 | 100% |
+| B two-rule gate | 1.00 | 0.83 | 0% |
+| B + unknown-node rule | 1.00 | 0.83 | 0% |
+| B + three-way (defer) gate | 1.00 | 0.83 | 0% |
+| C oracle | 1.00 | 1.00 | 0% |
+| Initial DAG only | 1.00 | 0.50 | 0% |
+| Forward-order filter (not PC/GES) | 1.00 | 0.83 | 0% |
 
-Estimand recovery (true exposure log-HR on CKD onset = 0.25): cause-specific Cox models recover **β̂ = 0.250 at 96% coverage** on the latent process; surveillance bias inflates the recorded estimate to 0.33; a naive visit-count adjustment over-corrects (collider bias). IIW weighting and QBA sensitivity sweeps correct the surveillance-driven component toward the true latent effect.
+Structural SDs are 0 (deterministic proposer and gate). Results files: `results/base_cell_results.json`, `replications.csv`, `sweeps.json`/`sweeps.csv`, `oracle_ckd.json`, `benchmark.json`, `environment_freeze.txt`. Run: `python -m closed_loop_sim.run_study 500`, `python -m closed_loop_sim.sweeps`, `python -m closed_loop_sim.benchmark`, `python -m closed_loop_sim.finalize`. The R port has **not** been updated for this revision and is not part of the reported results.
 
 ### Figures
 
@@ -153,7 +157,7 @@ closed_loop_sim/
   eventlog.py      assemble the patient-level activity event log
   discovery.py     directly-follows graph (pm4py) + monitoring-stratified evidence & activity mapping
   refinement.py    Proposer/Gate interfaces, Arms A/B/C, Baselines, multi-cycle iterative refinement & stopping rules (A31), backward edge cost metric (A10)
-  estimation.py    primary CIF contrasts (RD/RR), RMST/RMTL (A14), IIW weighting (Lin 2004), QBA sensitivity (A19), arm-specific Cox models (A13)
+  estimation.py    arm-specific analysis: IPW Aalen-Johansen CIF/RMTL with bootstrap intervals, detection-sensitivity QBA, Cox log-HR (secondary); causal.py: d-separation, propensity/overlap diagnostics, bootstrap
   calibration.py   observed-log Table-4 calibration, propensity diagnostics (SMDs, max weight, ESS) (A17), backdoor set derivation (A18)
   metrics.py       structural metrics graded vs the oracle
   experiment.py    run replications of a cell, Wilson confidence intervals (A23), MCSE aggregation

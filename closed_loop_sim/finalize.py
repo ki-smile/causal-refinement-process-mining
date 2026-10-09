@@ -79,56 +79,44 @@ def render_doc(vals: dict) -> None:
 
 
 def render_figure() -> None:
+    """(a) transition-graph classification for all arms; (b) the primary estimand by arm
+    against the 1,000,000-patient latent oracle."""
+    import pandas as pd
     s = RES["cell"]["structural"]
     e = RES["cell"]["estimation"]
-    fig, ax = plt.subplots(1, 2, figsize=(10, 4.2))
+    reps = pd.read_csv(ROOT / "results" / "replications.csv")
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
 
-    arms = ["A\n(ungated)", "B\n(governed)", "C\n(oracle)"]
-    rates = [s[a]["accept_any_trap_rate"] for a in ("A", "B", "C")]
-    bars = ax[0].bar(arms, rates, color=["#c0392b", "#27ae60", "#7f8c8d"])
-    ax[0].set_ylim(0, 1.05)
-    ax[0].set_ylabel("P(accepts ≥1 injected artefact)")
-    ax[0].set_title("Artefact resistance")
-    for b, r in zip(bars, rates):
-        ax[0].text(b.get_x() + b.get_width() / 2, r + 0.02, pct(r), ha="center", fontsize=10)
+    arms = ["A", "B", "B_unk", "B_defer", "C", "Initial", "PC_Temporal"]
+    labels = ["A\nungated", "B\ntwo rules", "B+\nunknown-node\nrule", "B+\ndefer", "C\noracle",
+              "Initial\nDAG", "Forward-\norder\nfilter"]
+    x = np.arange(len(arms)); w = 0.38
+    ax[0].bar(x - w / 2, [s[a]["precision_mean"] for a in arms], w, label="precision", color="#2980b9")
+    ax[0].bar(x + w / 2, [s[a]["recall_mean"] for a in arms], w, label="recall", color="#e67e22")
+    for i, a in enumerate(arms):
+        ax[0].text(i, 1.04, f"{100 * s[a]['accept_any_trap_rate']:.0f}%", ha="center", fontsize=8)
+    ax[0].text(len(arms) / 2 - 0.5, 1.12, "accepts a designed artefact", ha="center", fontsize=8, style="italic")
+    ax[0].set_xticks(x); ax[0].set_xticklabels(labels, fontsize=7); ax[0].set_ylim(0, 1.2)
+    ax[0].set_title("(a) Transition-graph classification, base cell (%d replications)" % RES["meta"]["M"], fontsize=9)
+    ax[0].legend(loc="lower right", fontsize=8)
 
-    # Use per-arm estimation metrics if present, falling back gracefully
-    if "by_arm" in e:
-        labels = ["Arm A\n(ungated)", "Arm B\n(governed)", "Arm C\n(oracle)", "latent\n(clean truth)"]
-        means = np.array([e["by_arm"]["A"]["mean_beta"], e["by_arm"]["B"]["mean_beta"],
-                          e["by_arm"]["C"]["mean_beta"], e["s0s1_latent"]["mean_beta"]])
-        p2_5 = np.array([e["by_arm"]["A"].get("p2_5", means[0] - 0.05), e["by_arm"]["B"].get("p2_5", means[1] - 0.05),
-                         e["by_arm"]["C"].get("p2_5", means[2] - 0.05), e["s0s1_latent"]["p2_5"]])
-        p97_5 = np.array([e["by_arm"]["A"].get("p97_5", means[0] + 0.05), e["by_arm"]["B"].get("p97_5", means[1] + 0.05),
-                          e["by_arm"]["C"].get("p97_5", means[2] + 0.05), e["s0s1_latent"]["p97_5"]])
-        colors = ["#c0392b", "#27ae60", "#2980b9", "#7f8c8d"]
-    else:
-        keys = ["s0s1_latent", "s0s1_naive", "s0s1_adjusted"]
-        labels = ["latent\n(clean)", "recorded\n(naive)", "visit-count\nadjusted\n(not rec.)"]
-        means = np.array([e[k]["mean_beta"] for k in keys])
-        p2_5 = np.array([e[k]["p2_5"] for k in keys])
-        p97_5 = np.array([e[k]["p97_5"] for k in keys])
-        colors = ["#27ae60", "#e67e22", "#c0392b"]
-
-    lo = np.array([means[i] - p2_5[i] for i in range(len(labels))])
-    hi = np.array([p97_5[i] - means[i] for i in range(len(labels))])
-    x = np.arange(len(labels))
-    ax[1].axhline(0.25, color="k", ls="--", lw=1, label="true β = 0.25")
-    ax[1].errorbar(x, means, yerr=[lo, hi], fmt="o", ms=8, capsize=5, lw=1.5,
-                   ecolor="#7f8c8d", zorder=3,
-                   mfc="none", mec="k", mew=0)
-    ax[1].scatter(x, means, color=colors, s=80, zorder=4)
-    for i in range(len(labels)):
-        ax[1].annotate(f"{means[i]:.2f}", (x[i], means[i]), textcoords="offset points",
-                       xytext=(10, 0), fontsize=10)
-    ax[1].set_xticks(x)
-    ax[1].set_xticklabels(labels)
-    ax[1].set_ylabel("estimated exposure log-HR on CKD onset")
-    ax[1].set_title("Estimand recovery across arms; bars = 95% MC interval")
-    ax[1].legend(loc="upper left", fontsize=9)
+    orc = e["truth_ckd_cif"]; truth = orc["risk_difference"]
+    rows = [("rd_latent", "B", "latent\nprocess"), ("rd_ipw", "A", "A\nrecorded"), ("rd_ipw", "B", "B / C\nrecorded"),
+            ("rd_ipw", "Initial", "Initial DAG\nrecorded")]
+    for i, (col, arm, lab) in enumerate(rows):
+        v = reps[reps.arm == arm][col].to_numpy()
+        lo, hi = np.percentile(v, [2.5, 97.5])
+        ax[1].errorbar(i, v.mean(), yerr=[[v.mean() - lo], [hi - v.mean()]], fmt="o",
+                       color="#7f8c8d" if col == "rd_latent" else "#c0392b", capsize=5)
+    ax[1].axhspan(truth - 2 * orc["risk_difference_se"], truth + 2 * orc["risk_difference_se"], color="k", alpha=0.15)
+    ax[1].axhline(truth, color="k", ls="--", lw=1, label=f"oracle = {truth:.4f} (n = {orc['n']:,})")
+    ax[1].set_xticks(range(len(rows))); ax[1].set_xticklabels([r[2] for r in rows], fontsize=8)
+    ax[1].set_ylabel("10-year CKD risk difference (PPI - H2B)")
+    ax[1].set_title("(b) Primary estimand; bars = 2.5-97.5 percentile", fontsize=9)
+    ax[1].legend(fontsize=8, loc="upper left")
     fig.tight_layout()
     out = ROOT / "results" / "figure_simulation.png"
-    fig.savefig(out, dpi=150)
+    fig.savefig(out, dpi=200)
     print("wrote", out)
 
 
@@ -152,13 +140,4 @@ def generate_phase4_recommendations(est_results: dict) -> dict:
 
 
 if __name__ == "__main__":
-    vals = fill()
-    render_doc(vals)
     render_figure()
-    recs = generate_phase4_recommendations(vals)
-    print("\nPhase 4 Primary Estimand Recommendations (Action A15):")
-    print(f"  Primary Target: {recs['primary_estimand']}")
-    print(f"  Secondary Target: {recs['secondary_estimand']}")
-    print("\nkey numbers:")
-    for k in ("cal_gap", "A_anytrap", "B_anytrap", "lat_cov", "naive_cov", "med_prop"):
-        print(f"  {k} = {vals[k]}")

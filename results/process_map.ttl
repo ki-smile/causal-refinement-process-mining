@@ -60,7 +60,7 @@
     :target :S3 ;
     :risk 0.21922428330522767 ;
     :count 260 ;
-    :medianTime 2.0282421179906507 ;
+    :medianTime 2.028242117990651 ;
     :monitoringAttenuation -2.8150359449250635 ;
     :isTrap false .
 
@@ -87,6 +87,6 @@
     :target :S3 ;
     :risk 0.2568306010928962 ;
     :count 94 ;
-    :medianTime 1.2946492933107705 ;
+    :medianTime 1.2946492933107714 ;
     :monitoringAttenuation -1.748571428571429 ;
     :isTrap false .

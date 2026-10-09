@@ -14,8 +14,7 @@ import pandas as pd
 
 from closed_loop_sim.config import GRANULARITY_STEP, SimConfig
 from closed_loop_sim.dgp import (
-    assign_exposure, draw_covariates, simulate_trajectory, spawn_patient_seeds,
-    standardize,
+    draw_population_setup, simulate_trajectory,
 )
 from closed_loop_sim.observation import (
     ACTIVITY_ORDER, generate_visits, inject_artifacts, observe_trajectory,
@@ -30,6 +29,9 @@ class EventLogData:
     E: np.ndarray              # (n,) exposure
     histories: list            # latent histories (for oracle cross-checks)
     visit_counts: np.ndarray   # (n,) number of visits per patient (monitoring intensity)
+    followup_end: np.ndarray = None   # (n,) end of observed follow-up (death, loss, or t_max)
+    loss_applied: bool = False        # True when independent loss to follow-up was simulated
+    Z: np.ndarray = None       # (n,) latent common cause (zeros unless enabled)
 
 
 def _death_time(history) -> float | None:
@@ -37,10 +39,8 @@ def _death_time(history) -> float | None:
 
 
 def build_event_log_data(n: int, cfg: SimConfig, seed: int) -> EventLogData:
-    setup_rng, patient_seqs = spawn_patient_seeds(seed, n)
-    L = draw_covariates(n, cfg.dgp.covariates, setup_rng)
-    L_std = standardize(L)
-    E = assign_exposure(L_std, cfg.dgp.propensity, setup_rng)
+    L, L_std, Z, E, patient_seqs = draw_population_setup(n, cfg.dgp, seed)
+    followup = np.zeros(n)
 
     records: list = []
     histories: list = []
@@ -50,15 +50,18 @@ def build_event_log_data(n: int, cfg: SimConfig, seed: int) -> EventLogData:
         dgp_rng = np.random.default_rng(dgp_seed)
         obs_rng = np.random.default_rng(obs_seed)
 
-        history = simulate_trajectory(L_std[i], int(E[i]), cfg.dgp, dgp_rng)
+        history = simulate_trajectory(L_std[i], int(E[i]), cfg.dgp, dgp_rng, Z[i])
         histories.append(history)
 
         death = _death_time(history)
         followup_end = min(cfg.dgp.t_max, death) if death is not None else cfg.dgp.t_max
+        if cfg.obs.loss_rate > 0:   # independent loss to follow-up (own draw; base cell unaffected)
+            followup_end = min(followup_end, float(obs_rng.exponential(1.0 / cfg.obs.loss_rate)))
+        followup[i] = followup_end
         visits = generate_visits(int(E[i]), cfg.obs, followup_end, obs_rng)
         visit_counts[i] = len(visits)
 
-        events = observe_trajectory(history, int(E[i]), visits)
+        events = observe_trajectory(history, int(E[i]), visits, followup_end)
         events = inject_artifacts(events, cfg.obs, visits, obs_rng)
 
         group = "PPI" if E[i] == 1 else "H2B"
@@ -79,7 +82,8 @@ def build_event_log_data(n: int, cfg: SimConfig, seed: int) -> EventLogData:
         df = df.sort_values(["case", "time", "_tb"]).drop(columns="_tb")
     df = df.reset_index(drop=True)
     return EventLogData(log=df, L=L, L_std=L_std, E=E,
-                        histories=histories, visit_counts=visit_counts)
+                        histories=histories, visit_counts=visit_counts,
+                        followup_end=followup, Z=Z, loss_applied=cfg.obs.loss_rate > 0)
 
 
 def build_event_log(n: int, cfg: SimConfig, seed: int) -> pd.DataFrame:

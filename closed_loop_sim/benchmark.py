@@ -18,8 +18,8 @@ import json
 import os
 import platform
 import sys
+import resource
 import time
-import tracemalloc
 from pathlib import Path
 
 from closed_loop_sim.config import base_cell
@@ -37,7 +37,6 @@ def benchmark_demonstrator(n: int = 294734, seed: int = 20260610, out_dir: str |
     """Benchmark the full closed-loop pipeline for n trajectories."""
     print(f"[benchmark] Starting demonstrator benchmark on n={n:,} trajectories...")
     
-    tracemalloc.start()
     t_start = time.perf_counter()
 
     # 1. Data Generation & Event Log Construction
@@ -70,10 +69,9 @@ def benchmark_demonstrator(n: int = 294734, seed: int = 20260610, out_dir: str |
     print(f"  - Phase 4 estimation & estimand recovery: {t_estimation:.2f} s")
 
     t_total = time.perf_counter() - t_start
-    current_mem, peak_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-
-
+    # Process peak resident set size (ru_maxrss: bytes on macOS, KiB on Linux).
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak_mem = rss if sys.platform == "darwin" else rss * 1024
     peak_mb = peak_mem / (1024 * 1024)
     peak_gb = peak_mem / (1024 * 1024 * 1024)
 
@@ -103,8 +101,9 @@ def benchmark_demonstrator(n: int = 294734, seed: int = 20260610, out_dir: str |
             "total_runtime": round(t_total, 3),
         },
         "memory": {
-            "peak_memory_mb": round(peak_mb, 2),
-            "peak_memory_gb": round(peak_gb, 4),
+            "peak_memory_mb": round(peak_mb, 1),
+            "measure": "process peak RSS (ru_maxrss), single process",
+            "peak_memory_gb": round(peak_gb, 3),
         },
         "refinement_metrics": {
             "arm_b_cycles_run": ref_b.cycles_run,

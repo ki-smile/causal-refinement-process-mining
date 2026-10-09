@@ -50,7 +50,7 @@
     :proposedEdgeSource :S2 ;
     :proposedEdgeTarget :S0 ;
     :accepted false ;
-    :rationale "rejected: protected-direction violation (S2->S0 is backward)" .
+    :rationale "rejected: administrative activity, not a biological causal edge" .
 
 :decision_S2_S1 a :RefinementDecision ;
     :proposedEdgeSource :S2 ;

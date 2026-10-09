@@ -50,11 +50,14 @@ def _first_visit_at_or_after(visits: list, onset: float):
     return next((v for v in visits if v >= onset), None)
 
 
-def observe_trajectory(history: History, E: int, visits: list) -> Events:
+def observe_trajectory(history: History, E: int, visits: list,
+                       followup_end: float = float("inf")) -> Events:
     """Visit-gated detection of CKD/CVAE (only if the detection visit is before
     death); exact recording of Death."""
     onset = {s: t for s, t in history}
     death_time = onset.get("S3")
+    if death_time is not None and death_time > followup_end:
+        death_time = None  # lost to follow-up before death: death is not recorded
     events: Events = [("IndexDrug", 0.0)]
     for state, activity in _STATE_ACTIVITY.items():
         if state in onset:
@@ -85,8 +88,7 @@ def inject_artifacts(events: Events, cfg: ObservationConfig, visits: list,
             out.append(("MedicationChange", next_visit))
         if rng.random() < cfg.p_recode:
             out.append(("CKD_recode", next_visit))
-        if cfg.challenge_scenario == "held_out_artifact" or getattr(cfg, "p_held_out", 0.0) > 0:
-            if rng.random() < getattr(cfg, "p_held_out", 0.35):
-                out.append(("Lab_Reassay", next_visit))
+        if cfg.p_held_out > 0 and rng.random() < cfg.p_held_out:
+            out.append(("Lab_Reassay", next_visit))
     return _sort_events(out)
 

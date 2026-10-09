@@ -20,9 +20,15 @@ ACTIVITY_TO_NODE = {
     "Death": "S3",
     "MedicationChange": "S0",   # decoy: medication change maps to the drug node
     "CKD_recode": "S1",          # coding shift maps to the CKD node
-    "Lab_Reassay": "S2",         # Action A10 held-out artifact class
+    # Held-out artefact class: maps to a node ABSENT from the true graph and from
+    # the gate's prespecified vocabulary, so it surfaces as a forward-looking
+    # candidate (S2->S4) that neither the directionality rule nor the
+    # administrative-activity rule anticipates.
+    "Lab_Reassay": "S4",
 }
-ADMIN_ACTIVITIES = {"MedicationChange", "Lab_Reassay"}  # administrative/lab, not biological transitions
+# Prespecified administrative vocabulary (Phase-1 knowledge). Deliberately does
+# NOT contain Lab_Reassay: that artefact is held out from the gate designer.
+ADMIN_ACTIVITIES = {"MedicationChange"}
 
 
 

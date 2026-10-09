@@ -7,6 +7,8 @@ report, a representative single-run DFG (pm4py), and a per-replication CSV.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import platform
 import sys
 from pathlib import Path
@@ -30,7 +32,10 @@ def main() -> None:
     cfg = base_cell()
 
     print(f"[1/5] base cell M={M} n={cfg.n} ...", flush=True)
-    cell = run_cell(cfg, M=M, with_estimation=True)
+    from closed_loop_sim.truth import cached_oracle
+    oracle = cached_oracle(cfg, OUT / "oracle_ckd.json", n=1_000_000)
+    cell = run_cell(cfg, M=M, with_estimation=True, workers=max(1, (os.cpu_count() or 2) - 1),
+                    oracle=oracle, boot_B=100)
 
     print("[2/5] mediation oracle (n=50000) ...", flush=True)
     med = mediated_proportion(cfg, n=50000, seed=999, horizon=cfg.dgp.t_max)
@@ -58,19 +63,20 @@ def main() -> None:
     per_rep = cell.pop("_per_rep")
     pd.DataFrame(per_rep).to_csv(OUT / "replications.csv", index=False)
 
+    import importlib.metadata as md
+    pkgs = ["numpy", "pandas", "scipy", "lifelines", "pm4py", "pydantic", "networkx", "matplotlib"]
+    meta = {"python": platform.python_version(), "platform": platform.platform(),
+            "cpu_count": os.cpu_count(), "master_seed": 20260610, "M": M, "n": cfg.n,
+            "packages": {p: md.version(p) for p in pkgs}}
     try:
-        import lifelines
-        lifelines_ver = lifelines.__version__
-    except ImportError:
-        lifelines_ver = "not installed"
-    try:
-        import pm4py
-        pm4py_ver = pm4py.__version__
-    except ImportError:
-        pm4py_ver = "not installed"
-    meta = {"python": platform.python_version(), "numpy": np.__version__,
-            "pandas": pd.__version__, "lifelines": lifelines_ver,
-            "pm4py": pm4py_ver, "master_seed": 20260610, "M": M, "n": cfg.n}
+        meta["git_commit_of_base"] = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                                                    text=True, check=True).stdout.strip()
+        meta["working_tree_dirty"] = bool(subprocess.run(["git", "status", "--porcelain"],
+                                                         capture_output=True, text=True).stdout.strip())
+    except Exception:
+        meta["git_commit_of_base"] = "unavailable"
+    (OUT / "environment_freeze.txt").write_text(
+        subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True).stdout)
 
     result = {"meta": meta, "config": cfg.model_dump(), "cell": cell,
               "mediation_oracle": med, "observed_calibration": obs_cal,

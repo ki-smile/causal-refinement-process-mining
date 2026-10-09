@@ -63,12 +63,12 @@ def assign_exposure(L_std: np.ndarray, cfg: PropensityConfig,
     return (rng.random(len(p)) < p).astype(int)
 
 
-def _linpred(tp, e: int, L_std: np.ndarray) -> float:
-    return tp.beta_E * e + float(np.asarray(tp.beta_L) @ L_std)
+def _linpred(tp, e: int, L_std: np.ndarray, z: float = 0.0, gamma: float = 0.0) -> float:
+    return tp.beta_E * e + float(np.asarray(tp.beta_L) @ L_std) + gamma * z
 
 
 def simulate_trajectory(L_std: np.ndarray, E, cfg: DGPConfig,
-                        rng: np.random.Generator) -> History:
+                        rng: np.random.Generator, z: float = 0.0) -> History:
     """Clock-reset competing-risks walk until Death or t_max.
 
     ``E`` may be an int (constant exposure) or a callable transition->0/1 (used by
@@ -97,7 +97,7 @@ def simulate_trajectory(L_std: np.ndarray, E, cfg: DGPConfig,
             else:
                 tp = cfg.transitions[tr_key]
             dt = sample_transition_time(tp.lam, tp.rho,
-                                        _linpred(tp, e_func(tr_key), L_std), rng)
+                                        _linpred(tp, e_func(tr_key), L_std, z, cfg.frailty_hazard), rng)
             if dt < best_dt:
                 best_k, best_dt = k, dt
         if t + best_dt > cfg.t_max:
@@ -106,6 +106,22 @@ def simulate_trajectory(L_std: np.ndarray, E, cfg: DGPConfig,
         state = best_k
         history.append((state, t))
     return history
+
+
+def draw_population_setup(n: int, cfg: DGPConfig, seed: int):
+    """Single source of truth for the population set-up shared by the event log and
+    the counterfactual oracles: returns (L, L_std, Z, E, patient_seqs). Z is the
+    latent common cause (all zeros, and no random draws, unless it is enabled)."""
+    setup_rng, patient_seqs = spawn_patient_seeds(seed, n)
+    L = draw_covariates(n, cfg.covariates, setup_rng)
+    L_std = standardize(L)
+    if cfg.frailty_hazard or cfg.frailty_exposure:
+        Z = setup_rng.normal(size=n)
+    else:
+        Z = np.zeros(n)
+    logit = cfg.propensity.alpha0 + L_std @ np.asarray(cfg.propensity.alpha) + cfg.frailty_exposure * Z
+    E = (setup_rng.random(n) < 1.0 / (1.0 + np.exp(-logit))).astype(int)
+    return L, L_std, Z, E, patient_seqs
 
 
 def spawn_patient_seeds(seed: int, n: int):
@@ -131,13 +147,10 @@ class PopulationData:
 
 
 def simulate_population(n: int, cfg: SimConfig, seed: int) -> PopulationData:
-    setup_rng, patient_seqs = spawn_patient_seeds(seed, n)
-    L = draw_covariates(n, cfg.dgp.covariates, setup_rng)
-    L_std = standardize(L)
-    E = assign_exposure(L_std, cfg.dgp.propensity, setup_rng)
+    L, L_std, Z, E, patient_seqs = draw_population_setup(n, cfg.dgp, seed)
     histories = []
     for i in range(n):
         dgp_seed, _obs_seed = patient_seqs[i].spawn(2)
         rng = np.random.default_rng(dgp_seed)
-        histories.append(simulate_trajectory(L_std[i], int(E[i]), cfg.dgp, rng))
+        histories.append(simulate_trajectory(L_std[i], int(E[i]), cfg.dgp, rng, Z[i]))
     return PopulationData(L=L, L_std=L_std, E=E, histories=histories)
