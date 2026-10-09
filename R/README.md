@@ -1,3 +1,5 @@
+> **LEGACY — not updated for the revision.** This R port implements the *original* design (Cox log-HR primary estimand, two-rule gate only). It does **not** include the competing-event CIF estimand, the 1,000,000-patient oracle with common random numbers, the three-way gate, the held-out artefact, the red-team scenarios or the detection-sensitivity bias analysis, and its results are not those reported in the manuscript. Use the Python package (`closed_loop_sim/`) for the reported results.
+
 # R port — ground-truth simulation
 
 A faithful R translation of the Python `closed_loop_sim` package, for statisticians who work
