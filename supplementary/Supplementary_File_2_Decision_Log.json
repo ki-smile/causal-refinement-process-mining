@@ -1,0 +1,283 @@
+{
+  "study_metadata": {
+    "study_id": "HP-CS-2025-001",
+    "study_title": "Closed-Loop Causal Model Refinement: PPI vs H2B, CKD Progression, Cardiovascular Events, and Mortality",
+    "framework": "HealthProcessAI Closed-Loop Framework (Phases 1-4)",
+    "synthetic_cohort": "SCREAM-calibrated synthetic electronic health records (N=294,734)",
+    "date_generated": "2026-06-10T14:30:00Z",
+    "export_format": "HealthProcessAI-Provenance-Audit-v2.1",
+    "governance_mode": "Human-in-the-Loop Expert Adjudication",
+    "named_adjudicators": [
+      {
+        "name": "Dr. Farhad Abtahi",
+        "role": "Lead Causal Methodologist & Senior Investigator",
+        "affiliation": "Karolinska Institutet / KTH Royal Institute of Technology"
+      },
+      {
+        "name": "Dr. Eduardo Illueca",
+        "role": "Clinical Epidemiologist & Lead Investigator",
+        "affiliation": "Karolinska Institutet"
+      }
+    ],
+    "llm_configuration": {
+      "model_identifier": "gemini-2.5-flash-001",
+      "provider": "Google AI Studio",
+      "temperature": 0.0,
+      "top_p": 0.95,
+      "seed": 20260610
+    }
+  },
+  "initial_knowledge_dag": {
+    "exposure": "PPI_Use",
+    "outcome": "Cardiovascular_Adverse_Event_CVAE",
+    "hypothesized_mediator": "CKD_Progression",
+    "baseline_confounders": ["Age", "Sex", "Diabetes", "Hypertension", "Baseline_eGFR"],
+    "initial_edges": [
+      {"from": "PPI_Use", "to": "CKD_Progression", "type": "hypothesized_causal"},
+      {"from": "PPI_Use", "to": "Cardiovascular_Adverse_Event_CVAE", "type": "hypothesized_direct"},
+      {"from": "CKD_Progression", "to": "Cardiovascular_Adverse_Event_CVAE", "type": "hypothesized_mediator_outcome"},
+      {"from": "Age", "to": "PPI_Use", "type": "confounding"},
+      {"from": "Age", "to": "Cardiovascular_Adverse_Event_CVAE", "type": "confounding"},
+      {"from": "Diabetes", "to": "PPI_Use", "type": "confounding"},
+      {"from": "Diabetes", "to": "Cardiovascular_Adverse_Event_CVAE", "type": "confounding"},
+      {"from": "Hypertension", "to": "PPI_Use", "type": "confounding"},
+      {"from": "Hypertension", "to": "Cardiovascular_Adverse_Event_CVAE", "type": "confounding"}
+    ],
+    "omitted_latent_elements": ["Competing_Risk_Death", "Post_Event_Prescription_Switching"]
+  },
+  "decision_log": [
+    {
+      "proposal_id": "PROP-001",
+      "timestamp": "2026-06-10T15:10:22Z",
+      "workflow_phase": "Phase 3: Structural DAG Refinement",
+      "proposal_type": "Add Node and Directed Edges (Competing Risk)",
+      "target_elements": {
+        "node_to_add": {
+          "label": "Death",
+          "causal_role": "Competing_Risk",
+          "state_type": "Absorbing"
+        },
+        "edges_to_add": [
+          {"from": "CKD_Progression", "to": "Death", "direction": "directed"},
+          {"from": "Cardiovascular_Adverse_Event_CVAE", "to": "Death", "direction": "directed"}
+        ]
+      },
+      "empirical_evidence_from_dfg": {
+        "transition_metrics": {
+          "CKD_to_Death": {
+            "ppi_transition_rate": 0.239,
+            "h2b_transition_rate": 0.179,
+            "relative_risk": 1.335,
+            "p_value": "< 0.0001",
+            "median_time_years": 1.8,
+            "iqr_years": [0.8, 3.4]
+          },
+          "CVAE_to_Death": {
+            "ppi_transition_rate": 0.470,
+            "h2b_transition_rate": 0.379,
+            "relative_risk": 1.240,
+            "p_value": "< 0.0001",
+            "median_time_years": 0.9,
+            "iqr_years": [0.3, 2.1]
+          }
+        },
+        "summary": "Process mining identified high-frequency terminal transitions from both renal and cardiovascular states to Death. The initial knowledge DAG lacked a mortality node, implying standard right-censoring."
+      },
+      "ai_suggestion_confidence": 0.95,
+      "automated_rule_evaluation": {
+        "rule_id": "R1_COMPETING_RISK_DETECTION",
+        "rule_evaluation": "TRIGGERED",
+        "description": "High terminal transition frequency (> 10% support) to absorbing state requires structural competing-event node."
+      },
+      "biological_plausibility_check": "PASS",
+      "adjudication_decision": "ACCEPTED",
+      "adjudicator_rationale": "Mortality is an inevitable absorbing endpoint in this longitudinal cohort. In patients experiencing renal decline or major vascular events, death acts as a competing event that precludes subsequent observational endpoints. Omitting Death forces standard Cox models to treat death as uninformative right-censoring, severely violating non-informative censoring assumptions. Accepted unanimously.",
+      "primary_adjudicator": "Dr. Eduardo Illueca",
+      "secondary_adjudicator": "Dr. Farhad Abtahi",
+      "resulting_dag_mutation": "Node 'Death' added (absorbing/competing risk); directed edges CKD->Death and CVAE->Death inserted."
+    },
+    {
+      "proposal_id": "PROP-002",
+      "timestamp": "2026-06-10T15:22:45Z",
+      "workflow_phase": "Phase 3: Structural DAG Refinement",
+      "proposal_type": "Add Directed Edge (Reverse Transition)",
+      "target_elements": {
+        "edges_to_add": [
+          {"from": "Cardiovascular_Adverse_Event_CVAE", "to": "CKD_Progression", "direction": "directed"}
+        ]
+      },
+      "empirical_evidence_from_dfg": {
+        "transition_metrics": {
+          "CVAE_to_CKD": {
+            "ppi_transition_rate": 0.246,
+            "h2b_transition_rate": 0.245,
+            "odds_ratio": 1.006,
+            "ci_95": [0.978, 1.035],
+            "p_value": 0.88,
+            "median_time_years": 1.4,
+            "iqr_years": [0.5, 2.9]
+          }
+        },
+        "summary": "DFG observed reverse sequence where CVAE encounter timestamp preceded CKD diagnosis timestamp in 24.6% of patients, exceeding the 10% discovery threshold."
+      },
+      "ai_suggestion_confidence": 0.54,
+      "automated_rule_evaluation": {
+        "rule_id": "R2_DIRECTIONALITY_AND_ACYCLICITY",
+        "rule_evaluation": "FLAGGED_POTENTIAL_VIOLATION",
+        "description": "Proposed edge reverses hypothesized sequence CKD -> CVAE and risks creating cyclic dependency."
+      },
+      "biological_plausibility_check": "FAIL",
+      "adjudication_decision": "REJECTED",
+      "adjudicator_rationale": "Although cardiorenal syndrome exhibits bidirectional physiological cross-talk, observational electronic records suffer from significant surveillance artifacts: acute cardiovascular hospitalization triggers routine intensive metabolic testing that re-detects pre-existing, previously unrecorded baseline CKD. The between-group differential is non-significant (OR 1.006, p=0.88), indicating an observation/coding artifact rather than exposure-dependent causal pathophysiology. Incorporating this edge creates a cycle in the DAG and invalidates identification of the forward mediator pathway. Rejected.",
+      "primary_adjudicator": "Dr. Eduardo Illueca",
+      "secondary_adjudicator": "Dr. Farhad Abtahi",
+      "resulting_dag_mutation": "NO_CHANGE (Proposal rejected; edge S2->S1 discarded)."
+    },
+    {
+      "proposal_id": "PROP-003",
+      "timestamp": "2026-06-10T15:35:10Z",
+      "workflow_phase": "Phase 3: Structural DAG Refinement",
+      "proposal_type": "Add Directed Edge (Feedback Loop / Treatment Switch)",
+      "target_elements": {
+        "edges_to_add": [
+          {"from": "Cardiovascular_Adverse_Event_CVAE", "to": "MedicationChange_S0", "direction": "directed"}
+        ]
+      },
+      "empirical_evidence_from_dfg": {
+        "transition_metrics": {
+          "CVAE_to_MedicationChange": {
+            "transition_frequency": 0.342,
+            "time_window_days": 30,
+            "median_time_days": 12,
+            "summary": "34.2% of surviving CVAE cases record an administrative medication change event within 30 days post-infarction."
+          }
+        },
+        "summary": "Empirical process mining surfaced a prominent transition loop from disease outcome back to drug-therapy encounter."
+      },
+      "ai_suggestion_confidence": 0.88,
+      "automated_rule_evaluation": {
+        "rule_id": "R3_ACTIVITY_TYPE_ADMINISTRATIVE_GATE",
+        "rule_evaluation": "REJECTION_MANDATED",
+        "description": "Administrative prescription adjustments post-outcome must not be encoded as etiologic causal edges."
+      },
+      "biological_plausibility_check": "FAIL",
+      "adjudication_decision": "REJECTED",
+      "adjudicator_rationale": "Post-event treatment switches reflect clinical guideline-mandated secondary prevention and prescribing reassessment following myocardial infarction. This represents post-baseline clinical management, not a causal disease mechanism relevant to baseline exposure etiology. Allowing an edge from S2 back to S0 creates a feedback loop, confounds the baseline index exposure, and induces collider stratification bias. Rejected.",
+      "primary_adjudicator": "Dr. Farhad Abtahi",
+      "secondary_adjudicator": "Dr. Eduardo Illueca",
+      "resulting_dag_mutation": "NO_CHANGE (Decoy edge rejected; administrative artifact filtered)."
+    },
+    {
+      "proposal_id": "PROP-004",
+      "timestamp": "2026-06-10T15:48:30Z",
+      "workflow_phase": "Phase 3: Structural DAG Refinement",
+      "proposal_type": "Validate & Retain Mediator Architecture",
+      "target_elements": {
+        "pathway": ["PPI_Use", "CKD_Progression", "Cardiovascular_Adverse_Event_CVAE"],
+        "structural_role": "Confirmed_Candidate_Mediator"
+      },
+      "empirical_evidence_from_dfg": {
+        "transition_metrics": {
+          "PPI_to_CKD": {
+            "transition_rate": 0.314,
+            "median_time_years": 3.1,
+            "iqr_years": [1.6, 5.2]
+          },
+          "CKD_to_CVAE": {
+            "transition_rate": 0.182,
+            "median_time_years": 2.4,
+            "iqr_years": [1.1, 4.1]
+          }
+        },
+        "summary": "Observed temporal succession consistently places CKD onset prior to CVAE in 81.3% of dual-event trajectories."
+      },
+      "ai_suggestion_confidence": 0.92,
+      "automated_rule_evaluation": {
+        "rule_id": "R4_TEMPORAL_PRECEDENCE_VALIDATION",
+        "rule_evaluation": "PASS",
+        "description": "Temporal ordering in longitudinal data corroborates hypothesized mediator succession."
+      },
+      "biological_plausibility_check": "PASS",
+      "adjudication_decision": "ACCEPTED",
+      "adjudicator_rationale": "Empirical trajectories strongly corroborate the hypothesized forward temporal ordering: drug exposure accelerates CKD onset, which subsequently elevates vascular risk. Biological mechanisms (endothelial dysfunction, vascular calcification, fluid overload) support this sequence. While observational sequence alone cannot prove causal mediation, empirical non-falsification justifies preserving CKD as a candidate mediator for formal mediation modeling. Accepted.",
+      "primary_adjudicator": "Dr. Eduardo Illueca",
+      "secondary_adjudicator": "Dr. Farhad Abtahi",
+      "resulting_dag_mutation": "Mediator status of CKD retained and certified for downstream mediation analysis."
+    },
+    {
+      "proposal_id": "PROP-005",
+      "timestamp": "2026-06-10T16:05:12Z",
+      "workflow_phase": "Phase 3: Structural DAG Refinement",
+      "proposal_type": "Annotate Transition Dynamics on DAG Edges",
+      "target_elements": {
+        "edge_annotations": [
+          {"edge": "PPI_Use -> CKD_Progression", "median_years": 3.1, "iqr": [1.6, 5.2]},
+          {"edge": "PPI_Use -> CVAE", "median_years": 4.2, "iqr": [2.1, 6.8]},
+          {"edge": "CKD_Progression -> CVAE", "median_years": 2.4, "iqr": [1.1, 4.1]},
+          {"edge": "CKD_Progression -> Death", "median_years": 1.8, "iqr": [0.8, 3.4]},
+          {"edge": "CVAE -> Death", "median_years": 0.9, "iqr": [0.3, 2.1]}
+        ]
+      },
+      "empirical_evidence_from_dfg": {
+        "summary": "Process mining performance algorithms extracted parametric transition distributions across all surviving valid edges."
+      },
+      "ai_suggestion_confidence": 0.96,
+      "automated_rule_evaluation": {
+        "rule_id": "R5_TEMPORAL_METRIC_ANNOTATION",
+        "rule_evaluation": "PASS",
+        "description": "Attaching inter-event transition distributions provides empirical temporal bounds for statistical model formulation."
+      },
+      "biological_plausibility_check": "PASS",
+      "adjudication_decision": "ACCEPTED",
+      "adjudicator_rationale": "Augmenting qualitative DAG arrows with empirical inter-event survival distributions bridges abstract causal topology and quantitative time-to-event statistical parameterization. Accepted.",
+      "primary_adjudicator": "Dr. Farhad Abtahi",
+      "secondary_adjudicator": "Dr. Eduardo Illueca",
+      "resulting_dag_mutation": "Temporal parametric weights (median, IQR) annotated on all DAG edges."
+    },
+    {
+      "proposal_id": "PROP-006",
+      "timestamp": "2026-06-10T16:25:40Z",
+      "workflow_phase": "Phase 4: Statistical Model Selection",
+      "proposal_type": "Recommend Primary Estimand and Analytical Protocol",
+      "target_elements": {
+        "primary_estimand": "Aalen-Johansen 10-year Standardized Cumulative Incidence Function (CIF) Risk Difference",
+        "confounding_strategy": "Inverse Probability Weighting (IPW) with stabilized propensity scores",
+        "competing_risk_handling": "Death treated as absorbing competing event (not censored)",
+        "mediation_strategy": "Causal mediation analysis for direct and indirect CIF contrasts",
+        "cautionary_flags": [
+          "Do not use naive Cox proportional hazards models for CKD onset without competing risk disclosure (Hernan 2010)",
+          "Do not use Fine-Gray subdistribution models as causal effect estimates without disclosing artificial risk-set retention (Young 2020)"
+        ]
+      },
+      "empirical_evidence_from_dfg": {
+        "summary": "Refined DAG exhibits competing event (Death), candidate mediator (CKD), and significant baseline confounding."
+      },
+      "ai_suggestion_confidence": 0.93,
+      "automated_rule_evaluation": {
+        "rule_id": "R6_EPIDEMIOLOGICAL_ESTIMAND_ALIGNMENT",
+        "rule_evaluation": "PASS",
+        "description": "Statistical model recommendation aligns with modern causal survival principles and refined graph topology."
+      },
+      "biological_plausibility_check": "PASS",
+      "adjudication_decision": "ACCEPTED",
+      "adjudicator_rationale": "Under high competing mortality, standard Cox cause-specific hazard ratios do not map directly to cumulative disease incidence and lack direct target-trial interpretation. Standardized CIF risk differences under the Aalen-Johansen estimator provide an identifiable, non-parametric estimand that cleanly reflects absolute excess risk. Accepted as study protocol.",
+      "primary_adjudicator": "Dr. Farhad Abtahi",
+      "secondary_adjudicator": "Dr. Eduardo Illueca",
+      "resulting_dag_mutation": "Statistical Analysis Plan locked to standardized CIF risk differences with IPW adjustment and competing-risk decomposition."
+    }
+  ],
+  "audit_trail_summary": {
+    "total_proposals_evaluated": 6,
+    "proposals_accepted": 4,
+    "proposals_rejected": 2,
+    "structural_rejections_rationale": [
+      "PROP-002: Reverse coding shift rejected due to non-differential surveillance artifact and acyclicity preservation",
+      "PROP-003: Post-event medication switch rejected due to administrative nature and prevention of feedback/collider bias"
+    ],
+    "final_governed_status": "LOCKED_FOR_ESTIMATION",
+    "adjudicator_signatures": [
+      {"name": "Farhad Abtahi", "timestamp": "2026-06-10T16:45:00Z", "verified": true},
+      {"name": "Eduardo Illueca", "timestamp": "2026-06-10T16:45:00Z", "verified": true}
+    ]
+  }
+}

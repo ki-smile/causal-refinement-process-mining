@@ -137,11 +137,11 @@ artefact edges, whereas Arm B rejects them and adds the Death competing-risk nod
 
 **Table S1. Structural recovery at the base cell (mean over M = 500; n = 5,000).**
 
-| Arm | Precision | Recall | F1 | SHD | Traps accepted | Death node added | Accepts ≥1 trap |
-|-----|-----------|--------|-----|-----|----------------|------------------|-----------------|
-| A — ungated proposal-only | 0.71 | 0.83 | 0.77 | 3.00 | 2.00 | 1.00 | 100% (0.99–1.00) |
-| B — governed (gate) | 1.00 | 0.83 | 0.91 | 1.00 | 0.00 | 1.00 | 0% (0.00–0.01) |
-| C — oracle | 1.00 | 1.00 | 1.00 | 0.00 | 0.00 | 1.00 | 0% |
+| Arm | Precision (SD) | Recall (SD) | F1 (SD) | SHD (SD) | Traps accepted (SD) | Death node added | Accepts ≥1 trap (95% Wilson CI) |
+|-----|----------------|-------------|---------|----------|---------------------|------------------|---------------------------------|
+| A — ungated proposal-only | 0.71 (0.00) | 0.83 (0.00) | 0.77 (0.00) | 3.00 (0.00) | 2.00 (0.00) | 1.00 | 100% (0.99–1.00) |
+| B — governed (gate) | 1.00 (0.00) | 0.83 (0.00) | 0.91 (0.00) | 1.00 (0.00) | 0.00 (0.00) | 1.00 | 0% (0.00–0.01) |
+| C — oracle | 1.00 (0.00) | 1.00 (0.00) | 1.00 (0.00) | 0.00 (0.00) | 0.00 (0.00) | 1.00 | 0% (0.00–0.01) |
 
 The primary contrast was unambiguous: Arm A accepted at least one artefact in
 100% of replications and Arm B in 0%. The decoy (S2→S0) was
@@ -159,8 +159,8 @@ is nonetheless recovered through the high-mortality S1→S3 and S2→S3 transiti
 
 Table S2 reports the exposure log-HR on CKD onset (true value 0.25). Fit to the
 underlying disease process, the cause-specific Cox model recovered the truth with
-negligible bias and near-nominal 95% coverage (mean β̂ = 0.250, 95% Monte Carlo
-interval 0.123–0.387), confirming that the model class the framework selects
+negligible bias and near-nominal 95% coverage (mean β̂ = 0.253, MCSE 0.003, 95% Monte Carlo
+interval 0.128–0.386), confirming that the model class the framework selects
 is correct. Fit to the *recorded* times, the estimate was inflated by surveillance bias
 and its coverage fell below nominal. Naively adjusting for the realised visit count did
 not repair this — it over-corrected (collider bias, because visit count is endogenous to
@@ -174,12 +174,12 @@ reach significance.
 
 **Table S2. Estimand recovery for the exposure log-HR (mean over M = 500).**
 
-| Target | True β^E | Mean β̂^E | Bias | RMSE | 95% CI coverage |
-|--------|----------|-----------|------|------|-----------------|
-| S0→S1, latent process (estimator validity) | 0.25 | 0.250 | -0.000 | 0.067 | 0.96 |
-| S0→S1, recorded (surveillance-inflated) | 0.25 | 0.327 | +0.077 | 0.105 | 0.83 |
-| S0→S1, post-hoc visit-count adjusted (not recommended) | 0.25 | 0.636 | +0.386 | 0.395 | 0.01 |
-| S1→S2, recorded (true effect null) | 0.00 | 0.180 | +0.180 | 0.273 | 0.91 |
+| Target | True β^E | Mean β̂^E (MCSE) | Bias | RMSE | 95% CI coverage (95% Wilson CI) |
+|--------|----------|-----------------|------|------|---------------------------------|
+| S0→S1, latent process (estimator validity) | 0.25 | 0.253 (0.003) | +0.003 | 0.067 | 0.97 (0.95–0.98) |
+| S0→S1, recorded (surveillance-inflated) | 0.25 | 0.332 (0.003) | +0.082 | 0.109 | 0.82 (0.78–0.85) |
+| S0→S1, post-hoc visit-count adjusted (not recommended) | 0.25 | 0.659 (0.004) | +0.409 | 0.418 | 0.004 (0.001–0.014) |
+| S1→S2, recorded (true effect null) | 0.00 | 0.180 (0.009) | +0.180 | 0.273 | 0.91 (0.88–0.93) |
 
 The mediated proportion of the PPI→CVAE effect flowing through CKD, estimated by
 high-precision g-computation on the known simulator (n = 50,000), was 0.45
