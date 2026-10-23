@@ -1,20 +1,20 @@
 {
   "action_item": "A33",
-  "n_trajectories": 294734,
-  "n_event_log_rows": 436395,
+  "n_trajectories": 10000,
+  "n_event_log_rows": 14902,
   "seed": 20260610,
   "framework_operating_mode": "Cycle-based diagnostic workflow (iterative batched analysis of longitudinal event logs), not real-time continuous stream processing.",
   "timing_sec": {
-    "data_generation": 11.591,
-    "process_discovery": 6.688,
-    "refinement_cycles": 0.08,
-    "estimation": 14.751,
-    "total_runtime": 33.11
+    "data_generation": 1.054,
+    "process_discovery": 0.42,
+    "refinement_cycles": 0.524,
+    "estimation": 1.889,
+    "total_runtime": 3.888
   },
   "memory": {
-    "peak_memory_mb": 842.5,
+    "peak_memory_mb": 162.5,
     "measure": "process peak RSS (ru_maxrss), single process",
-    "peak_memory_gb": 0.823
+    "peak_memory_gb": 0.159
   },
   "refinement_metrics": {
     "arm_b_cycles_run": 2,
@@ -24,10 +24,10 @@
     "arm_b_f1": 0.9090909090909091
   },
   "hardware": {
-    "python_version": "3.10.9",
-    "platform": "macOS-26.5.1-arm64-arm-64bit",
-    "processor": "arm",
+    "python_version": "3.12.3",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "processor": "Intel64 Family 6 Model 141 Stepping 1, GenuineIntel",
     "architecture": "64bit",
-    "cpu_count_logical": 10
+    "cpu_count_logical": 16
   }
 }

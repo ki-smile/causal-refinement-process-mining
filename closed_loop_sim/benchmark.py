@@ -18,7 +18,10 @@ import json
 import os
 import platform
 import sys
-import resource
+try:
+    import resource
+except ImportError:
+    resource = None
 import time
 from pathlib import Path
 
@@ -69,11 +72,21 @@ def benchmark_demonstrator(n: int = 294734, seed: int = 20260610, out_dir: str |
     print(f"  - Phase 4 estimation & estimand recovery: {t_estimation:.2f} s")
 
     t_total = time.perf_counter() - t_start
-    # Process peak resident set size (ru_maxrss: bytes on macOS, KiB on Linux).
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    peak_mem = rss if sys.platform == "darwin" else rss * 1024
-    peak_mb = peak_mem / (1024 * 1024)
-    peak_gb = peak_mem / (1024 * 1024 * 1024)
+    # Process peak resident set size (ru_maxrss: bytes on macOS, KiB on Linux; fallback to psutil on Windows).
+    if resource is not None:
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        peak_mem = rss if sys.platform == "darwin" else rss * 1024
+        peak_mb = peak_mem / (1024 * 1024)
+        peak_gb = peak_mem / (1024 * 1024 * 1024)
+    else:
+        try:
+            import psutil
+            peak_mem = psutil.Process().memory_info().rss
+            peak_mb = peak_mem / (1024 * 1024)
+            peak_gb = peak_mem / (1024 * 1024 * 1024)
+        except Exception:
+            peak_mb = 0.0
+            peak_gb = 0.0
 
     # Hardware & System Metadata
     hw_info = {

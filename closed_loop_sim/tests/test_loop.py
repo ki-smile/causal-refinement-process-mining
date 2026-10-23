@@ -211,13 +211,14 @@ def test_action_a10_challenge_scenarios_and_backward_edge_cost():
     assert cost["fn_count"] >= 0
 
 
-def test_action_a33_demonstrator_benchmark():
+def test_action_a33_demonstrator_benchmark(tmp_path):
     from closed_loop_sim.benchmark import benchmark_demonstrator
-    res = benchmark_demonstrator(n=500, seed=42)
+    res = benchmark_demonstrator(n=500, seed=42, out_dir=tmp_path)
     assert res["n_trajectories"] == 500
     assert "timing_sec" in res
     assert "memory" in res
     assert "Cycle-based diagnostic workflow" in res["framework_operating_mode"]
+    assert (tmp_path / "benchmark.json").exists()
 
 
 
