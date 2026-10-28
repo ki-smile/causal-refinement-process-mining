@@ -1,0 +1,6 @@
+{
+  "name": "Closed-Loop DAG",
+  "description": "A scientific workbench implementing the Closed-Loop Framework for Real-World Data Model Refinement. It integrates domain knowledge with data-driven process mining to refine causal DAGs for health research.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
